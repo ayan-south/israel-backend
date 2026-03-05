@@ -31,15 +31,19 @@ app.use(helmet({
 app.disable('x-powered-by');
 
 // ── CORS ──────────────────────────────────────────────
+// ── CORS ──────────────────────────────────────────────
 const allowed = [
   process.env.FRONTEND_URL,
+  'https://www.southafricagovvisacheck.com',
+  'https://southafricagovvisacheck.com',
   'http://localhost:3000',
   'http://localhost:3001',
 ].filter(Boolean);
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin && process.env.NODE_ENV === 'development') return cb(null, true);
+    // Allow server-to-server or same-origin requests (no origin header)
+    if (!origin) return cb(null, true);
     if (allowed.includes(origin)) return cb(null, true);
     cb(new Error(`CORS: ${origin} not allowed`));
   },
@@ -47,6 +51,11 @@ app.use(cors({
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization'],
 }));
+
+// ── Explicitly handle OPTIONS preflight ───────────────
+app.options('*', cors());
+
+
 
 // ── Rate limit ────────────────────────────────────────
 app.use(rateLimit({ windowMs: 15*60*1000, max: 500, standardHeaders: true, legacyHeaders: false }));
