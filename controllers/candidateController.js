@@ -177,7 +177,7 @@ export const editCandidate = async (req, res, next) => {
     if (dateOfBirth)         candidate.dateOfBirth    = dateOfBirth;
     if (profession !== undefined) candidate.profession = profession?.trim() || '';
     if (companyName !== undefined) candidate.companyName = companyName?.trim() || '';
-    if (visaNumber  !== undefined) candidate.visaNumber  = visaNumber?.trim()  || '';
+    // if (visaNumber  !== undefined) candidate.visaNumber  = visaNumber?.trim()  || '';
     if (visaIssueDate !== undefined) candidate.visaIssueDate = visaIssueDate || null;
     if (visaExpiryDate !== undefined) candidate.visaExpiryDate = visaExpiryDate || null;
     if (visaType !== undefined) candidate.visaType   = visaType?.trim() || '';

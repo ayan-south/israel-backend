@@ -22,7 +22,7 @@ const candidateSchema = new mongoose.Schema({
   // CORE FIELDS — null when not used (not '' — avoids unique index conflicts)
   passportNumber:  { type: String, default: null, uppercase: true, trim: true, sparse: true },
   controlNumber:   { type: String, default: null, uppercase: true, trim: true, sparse: true },
-  visaNumber:      { type: String, default: '', trim: true },
+  visaNumber:      { type: String, default: null, trim: true },
   fullName:        { type: String, required: true, trim: true },
   dateOfBirth:     { type: Date,   required: true },
   profession:      { type: String, default: '', trim: true },
@@ -68,6 +68,7 @@ candidateSchema.index({ adminId: 1, applicationNumber: 1 }, { unique: true });
 // sparse indexes for passport/control — null values are ignored (no conflict)
 candidateSchema.index({ passportNumber: 1 }, { sparse: true });
 candidateSchema.index({ controlNumber: 1 },  { sparse: true });
+candidateSchema.index({ visaNumber: 1 },     { sparse: true });
 
 const Candidate = mongoose.model('Candidate', candidateSchema);
 export default Candidate;
