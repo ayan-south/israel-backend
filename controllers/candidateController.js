@@ -117,7 +117,7 @@ export const addCandidate = async (req, res, next) => {
     const candidate = await Candidate.create({
       adminId,
       identifierType: idType,
-      passportNumber:  idType === 'passport' ? idValue : null,
+      passportNumber:  idType === 'passport' ? idValue : (passportNumber?.toUpperCase().trim() || null),
       controlNumber:   idType === 'control'  ? idValue : null,
       visaNumber:      visaNumber?.trim()     || '',
       fullName:        fullName.trim(),
@@ -168,9 +168,9 @@ export const editCandidate = async (req, res, next) => {
       candidate.passportNumber = passportNumber.toUpperCase().trim();
       candidate.controlNumber = null;
     }
-    if (identifierType === 'control' && controlNumber) {
+    if (identifierType === "control" && controlNumber) {
       candidate.controlNumber = controlNumber.toUpperCase().trim();
-      candidate.passportNumber = null;
+      if (passportNumber !== undefined) candidate.passportNumber = passportNumber?.toUpperCase().trim() || null;
     }
 
     if (fullName)            candidate.fullName       = fullName.trim();
