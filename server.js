@@ -34,8 +34,7 @@ app.disable('x-powered-by');
 // ── CORS ──────────────────────────────────────────────
 const allowed = [
   process.env.FRONTEND_URL,
-  'https://www.southafricagovvisacheck.com',
-  'https://southafricagovvisacheck.com',
+  'https://israel-frontend.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',
 ].filter(Boolean);
