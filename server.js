@@ -78,6 +78,10 @@ app.get('/api/health', (req, res) =>
   res.json({ success: true, status: 'ok', env: process.env.NODE_ENV, time: new Date().toISOString() })
 );
 
+app.get("/", (req, res) => {
+  res.send("Israel Visa Backend API Running 🚀");
+});
+
 // ── Routes ────────────────────────────────────────────
 app.use('/api/auth',          authRoutes);
 app.use('/api/superadmin',    superAdminRoutes);
