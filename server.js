@@ -34,6 +34,8 @@ app.disable('x-powered-by');
 // ── CORS ──────────────────────────────────────────────
 const allowed = [
   process.env.FRONTEND_URL,
+   'https://www.israelgovgovisa.com', 
+  'https://israelgovgovisa.com',       
   'https://israel-frontend.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',
