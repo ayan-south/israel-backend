@@ -1,12 +1,8 @@
 import Candidate from '../models/Candidate.js';
 import logger from '../utils/logger.js';
 import XLSX from 'xlsx';
-import { existsSync, unlinkSync } from 'fs';
 import path from 'path';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { uploadToCloudinary, deleteFromCloudinary, getPublicIdFromUrl, generateSignedUrl } from '../middleware/upload.js';
 
 // Helper: build admin-scoped filter
 const adminFilter = (req, extra = {}) => {
@@ -89,8 +85,10 @@ export const addCandidate = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Required fields missing.' });
     }
 
-    const idType = identifierType || 'passport';
-    const idValue = idType === 'control' ? controlNumber?.toUpperCase().trim() : passportNumber?.toUpperCase().trim();
+    const idType  = identifierType || 'passport';
+    const idValue = idType === 'control'
+      ? controlNumber?.toUpperCase().trim()
+      : passportNumber?.toUpperCase().trim();
     if (!idValue) {
       return res.status(400).json({ success: false, message: `${idType === 'control' ? 'Control' : 'Passport'} number required.` });
     }
@@ -101,42 +99,50 @@ export const addCandidate = async (req, res, next) => {
     const dupApp = await Candidate.findOne({ adminId, applicationNumber: applicationNumber.toUpperCase().trim() });
     if (dupApp) return res.status(409).json({ success: false, message: `Application "${applicationNumber}" already exists.` });
 
-    const initStatus = status || 'Pending';
-    const photoPath = req.files?.photo?.[0]?.path || null;
-
-    // Visa document (image or PDF)
-    let visaDocPath = null, visaDocType = null, visaDocName = null;
-    if (req.files?.visaDocument?.[0]) {
-      const vf = req.files.visaDocument[0];
-      visaDocPath = vf.path;
-      visaDocName = vf.originalname;
-      const ext = path.extname(vf.originalname).toLowerCase();
-      visaDocType = ext === '.pdf' ? 'pdf' : 'image';
+    // ── FIX: Photo — Cloudinary pe upload karo ──
+    let photoUrl = null;
+    if (req.files?.photo?.[0]) {
+      const pf     = req.files.photo[0];
+      const result = await uploadToCloudinary(pf.buffer, pf.originalname, 'visa-app/photos');
+      photoUrl     = result.secure_url;
     }
+
+    // ── FIX: Visa doc — Cloudinary pe upload karo ──
+    let visaDocUrl = null, visaDocType = null, visaDocName = null;
+    if (req.files?.visaDocument?.[0]) {
+      const vf     = req.files.visaDocument[0];
+      const result = await uploadToCloudinary(vf.buffer, vf.originalname, 'visa-app/visa-docs');
+      visaDocUrl   = result.secure_url;
+      visaDocName  = vf.originalname;
+      const ext    = path.extname(vf.originalname).toLowerCase();
+      visaDocType  = ext === '.pdf' ? 'pdf' : 'image';
+    }
+
+    const initStatus = status || 'Pending';
 
     const candidate = await Candidate.create({
       adminId,
-      identifierType: idType,
-      passportNumber:  idType === 'passport' ? idValue : (passportNumber?.toUpperCase().trim() || null),
-      controlNumber:   idType === 'control'  ? idValue : null,
-      visaNumber:      visaNumber?.trim()     || '',
-      fullName:        fullName.trim(),
+      identifierType:   idType,
+      passportNumber:   idType === 'passport' ? idValue : (passportNumber?.toUpperCase().trim() || null),
+      controlNumber:    idType === 'control'  ? idValue : null,
+      visaNumber:       visaNumber?.trim()    || '',
+      fullName:         fullName.trim(),
       dateOfBirth,
-      profession:      profession?.trim()     || '',
-      companyName:     companyName?.trim()    || '',
-      visaIssueDate:   visaIssueDate          || null,
-      visaExpiryDate:  visaExpiryDate         || null,
-      visaType:        visaType?.trim()       || '',
-      country:         country.trim(),
-      status:          initStatus,
-      message:         message?.trim()        || '',
+      profession:       profession?.trim()    || '',
+      companyName:      companyName?.trim()   || '',
+      visaIssueDate:    visaIssueDate         || null,
+      visaExpiryDate:   visaExpiryDate        || null,
+      visaType:         visaType?.trim()      || '',
+      country:          country.trim(),
+      status:           initStatus,
+      message:          message?.trim()       || '',
       applicationNumber: applicationNumber.toUpperCase().trim(),
-      applicationDate: applicationDate        || new Date(),
-      photo:           photoPath,
-      visaDocument:    visaDocPath,
+      applicationDate:  applicationDate       || new Date(),
+      photo:            photoUrl,        // Cloudinary URL
+      visaDocument:     visaDocUrl,      // Cloudinary URL
       visaDocumentType: visaDocType,
       visaDocumentName: visaDocName,
-      statusHistory:   [{ status: initStatus, changedBy: req.user.name || req.user.email }],
+      statusHistory:    [{ status: initStatus, changedBy: req.user.name || req.user.email }],
     });
 
     logger.info('Candidate added', { app: candidate.applicationNumber, by: req.user.email });
@@ -166,32 +172,45 @@ export const editCandidate = async (req, res, next) => {
     if (identifierType) candidate.identifierType = identifierType;
     if (identifierType === 'passport' && passportNumber) {
       candidate.passportNumber = passportNumber.toUpperCase().trim();
-      candidate.controlNumber = null;
+      candidate.controlNumber  = null;
     }
-    if (identifierType === "control" && controlNumber) {
+    if (identifierType === 'control' && controlNumber) {
       candidate.controlNumber = controlNumber.toUpperCase().trim();
       if (passportNumber !== undefined) candidate.passportNumber = passportNumber?.toUpperCase().trim() || null;
     }
 
-    if (fullName)            candidate.fullName       = fullName.trim();
-    if (dateOfBirth)         candidate.dateOfBirth    = dateOfBirth;
-    if (profession !== undefined) candidate.profession = profession?.trim() || '';
-    if (companyName !== undefined) candidate.companyName = companyName?.trim() || '';
-    // if (visaNumber  !== undefined) candidate.visaNumber  = visaNumber?.trim()  || '';
-    if (visaIssueDate !== undefined) candidate.visaIssueDate = visaIssueDate || null;
-    if (visaExpiryDate !== undefined) candidate.visaExpiryDate = visaExpiryDate || null;
-    if (visaType !== undefined) candidate.visaType   = visaType?.trim() || '';
-    if (country)             candidate.country        = country.trim();
-    if (message !== undefined) candidate.message    = message?.trim() || '';
-    if (applicationDate)     candidate.applicationDate = applicationDate;
+    if (fullName)                        candidate.fullName        = fullName.trim();
+    if (dateOfBirth)                     candidate.dateOfBirth     = dateOfBirth;
+    if (profession    !== undefined)     candidate.profession      = profession?.trim()   || '';
+    if (companyName   !== undefined)     candidate.companyName     = companyName?.trim()  || '';
+    if (visaIssueDate !== undefined)     candidate.visaIssueDate   = visaIssueDate  || null;
+    if (visaExpiryDate !== undefined)    candidate.visaExpiryDate  = visaExpiryDate || null;
+    if (visaType      !== undefined)     candidate.visaType        = visaType?.trim() || '';
+    if (country)                         candidate.country         = country.trim();
+    if (message       !== undefined)     candidate.message         = message?.trim() || '';
+    if (applicationDate)                 candidate.applicationDate = applicationDate;
 
-    // Photo update
-    if (req.files?.photo?.[0]) candidate.photo = req.files.photo[0].path;
+    // ── FIX: Photo update — Cloudinary pe upload karo ──
+    if (req.files?.photo?.[0]) {
+      if (candidate.photo) {
+        const urlInfo = getPublicIdFromUrl(candidate.photo);
+        if (urlInfo) await deleteFromCloudinary(urlInfo.publicId, urlInfo.resourceType);
+      }
+      const pf     = req.files.photo[0];
+      const result = await uploadToCloudinary(pf.buffer, pf.originalname, 'visa-app/photos');
+      candidate.photo = result.secure_url;
+    }
 
-    // Visa document update (replaces old one)
+    // ── FIX: Visa doc update — Cloudinary pe upload karo ──
     if (req.files?.visaDocument?.[0]) {
-      const vf = req.files.visaDocument[0];
-      candidate.visaDocument     = vf.path;
+      // Purana doc delete karo Cloudinary se
+      if (candidate.visaDocument) {
+        const urlInfo = getPublicIdFromUrl(candidate.visaDocument);
+        if (urlInfo) await deleteFromCloudinary(urlInfo.publicId, urlInfo.resourceType);
+      }
+      const vf     = req.files.visaDocument[0];
+      const result = await uploadToCloudinary(vf.buffer, vf.originalname, 'visa-app/visa-docs');
+      candidate.visaDocument     = result.secure_url;
       candidate.visaDocumentName = vf.originalname;
       const ext = path.extname(vf.originalname).toLowerCase();
       candidate.visaDocumentType = ext === '.pdf' ? 'pdf' : 'image';
@@ -255,17 +274,34 @@ export const exportExcel = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// GET /api/candidates/admin/download/:id  — serve visa doc to admin
+// GET /api/candidates/admin/download/:id — serve visa doc to admin
 export const downloadVisa = async (req, res, next) => {
   try {
     const query = { _id: req.params.id, isDeleted: false };
     if (req.adminScope) query.adminId = req.adminScope;
     const c = await Candidate.findOne(query);
+
     if (!c) return res.status(404).json({ success: false, message: 'Not found.' });
-    if (!c.visaDocument || !existsSync(c.visaDocument)) {
-      return res.status(404).json({ success: false, message: 'No visa document uploaded.' });
+    if (!c.visaDocument) return res.status(404).json({ success: false, message: 'No visa document uploaded.' });
+    if (!c.visaDocument.startsWith('http')) {
+      return res.status(404).json({ success: false, message: 'Document not available. Please re-upload.' });
     }
-    res.download(c.visaDocument, c.visaDocumentName || `VisaDoc-${c.applicationNumber}`);
+
+    const ext   = path.extname(c.visaDocumentName || '').toLowerCase();
+    const isPdf = ext === '.pdf' || c.visaDocumentType === 'pdf';
+
+    if (isPdf) {
+      // PDF raw type se upload hoti hai — signed URL generate karo taki 401 na aaye
+      const urlInfo = getPublicIdFromUrl(c.visaDocument);
+      if (!urlInfo) {
+        return res.status(500).json({ success: false, message: 'Invalid document URL.' });
+      }
+      const signedUrl = generateSignedUrl(urlInfo.publicId, urlInfo.resourceType);
+      return res.redirect(signedUrl);
+    }
+
+    // Image ke liye direct redirect karo — image/upload publicly accessible hoti hai
+    return res.redirect(c.visaDocument);
   } catch (err) { next(err); }
 };
 
@@ -294,24 +330,24 @@ export const trackVisa = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        identifierType:    c.identifierType  || 'passport',
-        passportNumber:    c.passportNumber,
-        controlNumber:     c.controlNumber,
-        visaNumber:        c.visaNumber,
-        fullName:          c.fullName,
-        dateOfBirth:       c.dateOfBirth,
-        profession:        c.profession,
-        companyName:       c.companyName,
-        visaIssueDate:     c.visaIssueDate,
-        visaExpiryDate:    c.visaExpiryDate,
-        visaType:          c.visaType,
-        country:           c.country,
-        status:            c.status,
-        message:           c.message,
+        identifierType:   c.identifierType  || 'passport',
+        passportNumber:   c.passportNumber,
+        controlNumber:    c.controlNumber,
+        visaNumber:       c.visaNumber,
+        fullName:         c.fullName,
+        dateOfBirth:      c.dateOfBirth,
+        profession:       c.profession,
+        companyName:      c.companyName,
+        visaIssueDate:    c.visaIssueDate,
+        visaExpiryDate:   c.visaExpiryDate,
+        visaType:         c.visaType,
+        country:          c.country,
+        status:           c.status,
+        message:          c.message,
         applicationNumber: c.applicationNumber,
-        hasVisaDocument:   isApproved && !!c.visaDocument,
-        visaDocumentType:  isApproved ? c.visaDocumentType : null,
-        candidateId:       c._id,
+        hasVisaDocument:  isApproved && !!c.visaDocument,
+        visaDocumentType: isApproved ? c.visaDocumentType : null,
+        candidateId:      c._id,
       },
     });
   } catch (err) { next(err); }
@@ -336,19 +372,32 @@ export const publicVisaDoc = async (req, res, next) => {
       isDeleted: false,
     });
 
-    if (!c || !c.visaDocument || !existsSync(c.visaDocument)) {
+    if (!c || !c.visaDocument) {
       return res.status(404).json({ success: false, message: 'Document not available.' });
     }
 
-    c.downloadLogs.push({ ip: req.ip }); await c.save();
+    // Purana local path — server pe exist nahi karti
+    if (!c.visaDocument.startsWith('http')) {
+      return res.status(404).json({ success: false, message: 'Document not available.' });
+    }
 
-    // Stream file with correct content-type
-    const ext = path.extname(c.visaDocument).toLowerCase();
-    const mimeTypes = { '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png' };
-    const mime = mimeTypes[ext] || 'application/octet-stream';
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Disposition', `inline; filename="${c.visaDocumentName || `visa-doc${ext}`}"`);
-    const { createReadStream } = await import('fs');
-    createReadStream(c.visaDocument).pipe(res);
+    c.downloadLogs.push({ ip: req.ip });
+    await c.save();
+
+    const ext   = path.extname(c.visaDocumentName || '').toLowerCase();
+    const isPdf = ext === '.pdf' || c.visaDocumentType === 'pdf';
+
+    if (isPdf) {
+      // PDF raw type — signed URL se redirect karo
+      const urlInfo = getPublicIdFromUrl(c.visaDocument);
+      if (!urlInfo) {
+        return res.status(500).json({ success: false, message: 'Invalid document URL.' });
+      }
+      const signedUrl = generateSignedUrl(urlInfo.publicId, urlInfo.resourceType);
+      return res.redirect(signedUrl);
+    }
+
+    // Image ke liye direct redirect
+    return res.redirect(c.visaDocument);
   } catch (err) { next(err); }
 };
